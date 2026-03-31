@@ -1,8 +1,18 @@
 "use client";
 
 import { useState, useCallback, useEffect } from "react";
-import { Heart, RefreshCw, BookOpen, Clock, Settings, Sparkles } from "lucide-react";
-import { getRandomPassage, getAllPassages, type Passage } from "@/lib/passages";
+import { Heart, RefreshCw, BookOpen, Clock, Settings, Sparkles, LogOut } from "lucide-react";
+import AuthGate from "@/components/AuthGate";
+
+interface Passage {
+  id: string;
+  text: string;
+  bookTitle: string;
+  author: string;
+  chapter?: string;
+  tags: string[];
+  language: string;
+}
 
 function PassageCard({ passage, onNext, onFavorite, isFavorited }: {
   passage: Passage;
@@ -53,20 +63,30 @@ function PassageCard({ passage, onNext, onFavorite, isFavorited }: {
 
 type Tab = "discover" | "bookshelf" | "history" | "settings";
 
-export default function Home() {
+function App() {
   const [passage, setPassage] = useState<Passage | null>(null);
+  const [allPassages, setAllPassages] = useState<Passage[]>([]);
   const [favorites, setFavorites] = useState<string[]>([]);
   const [tab, setTab] = useState<Tab>("discover");
 
-  useEffect(() => {
-    setPassage(getRandomPassage());
-    const saved = localStorage.getItem("rp-favorites");
-    if (saved) setFavorites(JSON.parse(saved));
+  const fetchRandom = useCallback(async () => {
+    const res = await fetch("/api/passages/random");
+    if (res.ok) setPassage(await res.json());
   }, []);
 
-  const next = useCallback(() => {
-    setPassage(getRandomPassage());
-  }, []);
+  useEffect(() => {
+    fetchRandom();
+    const saved = localStorage.getItem("rp-favorites");
+    if (saved) setFavorites(JSON.parse(saved));
+  }, [fetchRandom]);
+
+  useEffect(() => {
+    if (tab === "bookshelf" && allPassages.length === 0) {
+      fetch("/api/passages")
+        .then((r) => r.json())
+        .then((data) => { if (Array.isArray(data)) setAllPassages(data); });
+    }
+  }, [tab, allPassages.length]);
 
   const toggleFavorite = useCallback(() => {
     if (!passage) return;
@@ -79,19 +99,25 @@ export default function Home() {
     });
   }, [passage]);
 
+  const handleLogout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    window.location.reload();
+  };
+
   return (
     <div className="min-h-screen flex flex-col">
-      {/* Header */}
-      <header className="navbar bg-base-200 justify-center">
+      <header className="navbar bg-base-200 justify-center relative">
         <h1 className="text-xl font-bold">📖 RandomPage</h1>
+        <button className="btn btn-ghost btn-sm absolute right-2" onClick={handleLogout}>
+          <LogOut size={16} />
+        </button>
       </header>
 
-      {/* Content */}
       <main className="flex-1 flex items-center justify-center p-4">
         {tab === "discover" && passage && (
           <PassageCard
             passage={passage}
-            onNext={next}
+            onNext={fetchRandom}
             onFavorite={toggleFavorite}
             isFavorited={favorites.includes(passage.id)}
           />
@@ -110,7 +136,7 @@ export default function Home() {
               </div>
             ) : (
               <div className="flex flex-col gap-3">
-                {getAllPassages()
+                {allPassages
                   .filter((p) => favorites.includes(p.id))
                   .map((p) => (
                     <div key={p.id} className="card bg-base-200 shadow-sm">
@@ -165,7 +191,6 @@ export default function Home() {
         )}
       </main>
 
-      {/* Bottom Nav */}
       <nav className="btm-nav btm-nav-sm bg-base-200">
         <button className={tab === "discover" ? "active" : ""} onClick={() => setTab("discover")}>
           <Sparkles size={20} />
@@ -185,5 +210,13 @@ export default function Home() {
         </button>
       </nav>
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <AuthGate>
+      <App />
+    </AuthGate>
   );
 }
