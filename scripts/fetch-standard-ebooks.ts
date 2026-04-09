@@ -172,18 +172,72 @@ function extractTextFromHtml(html: string): string[] {
   return paragraphs;
 }
 
+// PLANET-527: Filter out copyright/metadata garbage passages
+const GARBAGE_PATTERNS = [
+  /\bThis ebook is the product of/i,
+  /\bstandard ebooks/i,
+  /\bcopyright/i,
+  /\blicen[sc]e/i,
+  /\bcreative commons/i,
+  /\bproject gutenberg/i,
+  /\bpublic domain/i,
+  /\bproduced by/i,
+  /\btranscriber/i,
+  /\bopds/i,
+  /\btable of contents/i,
+  /\bdedication/i,
+  /\bcolophon/i,
+  /\bimprint/i,
+  /\buncopyright/i,
+  /\bendnotes/i,
+  /^By .+\. Translated by/,
+  /^By .+\. This ebook/,
+];
+
+function isGarbage(text: string): boolean {
+  return GARBAGE_PATTERNS.some((pat) => pat.test(text));
+}
+
+// PLANET-528: Break at sentence boundary instead of hard-slicing
+function breakAtSentence(text: string, maxLen: number): string {
+  if (text.length <= maxLen) return text;
+  // Find the last sentence-ending punctuation within maxLen
+  const sub = text.slice(0, maxLen);
+  const lastEnd = Math.max(
+    sub.lastIndexOf(". "),
+    sub.lastIndexOf("! "),
+    sub.lastIndexOf("? "),
+    sub.lastIndexOf(".\u201D"),
+    sub.lastIndexOf(".\u2019"),
+    sub.lastIndexOf(".\"")
+  );
+  if (lastEnd > maxLen * 0.4) {
+    // Found a reasonable sentence break
+    return text.slice(0, lastEnd + 1).trim();
+  }
+  // Fallback: break at last space
+  const lastSpace = sub.lastIndexOf(" ");
+  if (lastSpace > maxLen * 0.4) {
+    return text.slice(0, lastSpace).trim() + "\u2026";
+  }
+  return sub.trim() + "\u2026";
+}
+
 function splitIntoPassages(paragraphs: string[], minLen = 100, maxLen = 600): string[] {
   const passages: string[] = [];
   let buffer = "";
 
   for (const p of paragraphs) {
+    // Skip garbage paragraphs
+    if (isGarbage(p)) continue;
+
     if (buffer.length + p.length + 1 <= maxLen) {
       buffer = buffer ? buffer + " " + p : p;
     } else {
       if (buffer.length >= minLen) {
         passages.push(buffer);
       }
-      buffer = p.length <= maxLen ? p : p.slice(0, maxLen);
+      buffer = p.length <= maxLen ? p : breakAtSentence(p, maxLen);
     }
   }
   if (buffer.length >= minLen) {
@@ -233,9 +287,11 @@ async function main() {
     console.log(`  → ${paragraphs.length} paragraphs extracted`);
 
     const chunks = splitIntoPassages(paragraphs);
-    console.log(`  → ${chunks.length} passage candidates`);
+    // Final garbage filter on assembled passages
+    const clean = chunks.filter((t) => !isGarbage(t));
+    console.log(`  → ${paragraphs.length} paras → ${chunks.length} chunks → ${clean.length} clean`);
 
-    const best = pickBestPassages(chunks, 7);
+    const best = pickBestPassages(clean, 7);
     console.log(`  → Selected ${best.length} passages`);
 
     for (const text of best) {
