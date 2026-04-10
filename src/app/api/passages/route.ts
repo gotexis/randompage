@@ -12,7 +12,7 @@ export async function GET() {
   const allPassages = await db.select().from(passages);
 
   return NextResponse.json(
-    allPassages.map((p) => ({
+    allPassages.map((p: { tags: string; [key: string]: unknown }) => ({
       ...p,
       tags: JSON.parse(p.tags),
     }))

@@ -15,7 +15,7 @@ export async function GET() {
     .where(eq(bookmarks.userId, session.userId))
     .orderBy(bookmarks.createdAt);
 
-  return NextResponse.json(rows.map((r) => r.passageId));
+  return NextResponse.json(rows.map((r: { passageId: string }) => r.passageId));
 }
 
 // POST /api/bookmarks — add bookmark { passageId }
