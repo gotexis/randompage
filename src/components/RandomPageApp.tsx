@@ -252,7 +252,7 @@ export default function RandomPageApp() {
         </button>
       </header>
 
-      <main className="flex-1 flex items-center justify-center p-4">
+      <main className="flex-1 flex items-center justify-center p-4 pb-20">
         {tab === "discover" && passage && (
           <PassageCard
             passage={passage}
@@ -511,12 +511,12 @@ export default function RandomPageApp() {
         )}
       </main>
 
-      <nav className="btm-nav btm-nav-sm bg-base-200">
-        <button className={tab === "discover" ? "active" : ""} onClick={() => setTab("discover")}>
+      <div className="dock dock-sm">
+        <button className={tab === "discover" ? "dock-active" : ""} onClick={() => setTab("discover")}>
           <Sparkles size={20} />
-          <span className="btm-nav-label text-xs">发现</span>
+          <span className="dock-label">发现</span>
         </button>
-        <button className={tab === "inbox" ? "active" : ""} onClick={() => setTab("inbox")}>
+        <button className={tab === "inbox" ? "dock-active" : ""} onClick={() => setTab("inbox")}>
           <div className="indicator">
             {pushInbox.filter((p) => !p.readAt).length > 0 && (
               <span className="indicator-item badge badge-primary badge-xs">
@@ -525,21 +525,21 @@ export default function RandomPageApp() {
             )}
             <Inbox size={20} />
           </div>
-          <span className="btm-nav-label text-xs">收件箱</span>
+          <span className="dock-label">收件箱</span>
         </button>
-        <button className={tab === "bookshelf" ? "active" : ""} onClick={() => setTab("bookshelf")}>
+        <button className={tab === "bookshelf" ? "dock-active" : ""} onClick={() => setTab("bookshelf")}>
           <Heart size={20} />
-          <span className="btm-nav-label text-xs">书架</span>
+          <span className="dock-label">书架</span>
         </button>
-        <button className={tab === "history" ? "active" : ""} onClick={() => setTab("history")}>
+        <button className={tab === "history" ? "dock-active" : ""} onClick={() => setTab("history")}>
           <Clock size={20} />
-          <span className="btm-nav-label text-xs">历史</span>
+          <span className="dock-label">历史</span>
         </button>
-        <button className={tab === "settings" ? "active" : ""} onClick={() => setTab("settings")}>
+        <button className={tab === "settings" ? "dock-active" : ""} onClick={() => setTab("settings")}>
           <Settings size={20} />
-          <span className="btm-nav-label text-xs">设置</span>
+          <span className="dock-label">设置</span>
         </button>
-      </nav>
+      </div>
     </div>
   );
 }
