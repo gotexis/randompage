@@ -511,7 +511,7 @@ export default function RandomPageApp() {
         )}
       </main>
 
-      <nav className="btm-nav btm-nav-sm bg-base-200 pb-[env(safe-area-inset-bottom)]">
+      <nav className="btm-nav btm-nav-sm bg-base-200">
         <button className={tab === "discover" ? "active" : ""} onClick={() => setTab("discover")}>
           <Sparkles size={20} />
           <span className="btm-nav-label text-xs">发现</span>

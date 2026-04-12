@@ -4,3 +4,8 @@
 @theme {
   --font-serif: "Noto Serif SC", "Georgia", serif;
 }
+
+/* PWA standalone safe area for bottom nav */
+.btm-nav {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
