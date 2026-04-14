@@ -1,7 +1,11 @@
 {
   "version": "6",
   "dialect": "sqlite",
+<<<<<<< HEAD
   "id": "109072a0-d5b7-4cbb-a914-13c6ae9428a8",
+=======
+  "id": "c7b1e83c-c391-4ed0-b32a-d29a2e811fe1",
+>>>>>>> 545e525 (fix: add /discover route + pushHistory table + record push sends)
   "prevId": "49fc51db-5529-4a89-804d-27f9b9a278d9",
   "tables": {
     "bookmarks": {
