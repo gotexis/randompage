@@ -239,6 +239,14 @@ export default function RandomPageApp() {
   }, [passage]);
 
   const handleLogout = async () => {
+    // Check if user is logged in via Logto or Passkey
+    const sess = await fetch("/api/auth/session").then(r => r.json());
+    if (sess.provider === 'logto') {
+      // Logto sign-out (server-side redirect to Logto end-session)
+      window.location.href = '/api/logto/sign-out';
+      return;
+    }
+    // Passkey logout
     await fetch("/api/auth/logout", { method: "POST" });
     window.location.reload();
   };
