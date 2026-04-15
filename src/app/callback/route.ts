@@ -4,6 +4,7 @@ import { redirect } from 'next/navigation';
 import { NextRequest } from 'next/server';
 
 export async function GET(request: NextRequest) {
-  await handleSignIn(logtoConfig, request.nextUrl.searchParams);
+  const searchParams = request.nextUrl.searchParams;
+  await handleSignIn(logtoConfig, searchParams);
   redirect('/');
 }
