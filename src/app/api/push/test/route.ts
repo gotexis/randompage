@@ -1,9 +1,10 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/db';
-import { pushSubscriptions, passages } from '@/db/schema';
+import { pushSubscriptions, pushHistory } from '@/db/schema';
 import { getSession } from '@/lib/auth';
 import { sendPush } from '@/lib/push';
 import { eq, sql } from 'drizzle-orm';
+import { getWeightedPassage } from '@/lib/preferences';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,8 +28,16 @@ export async function POST() {
     return NextResponse.json({ error: 'No push subscriptions found. Enable push in Settings first.' }, { status: 400 });
   }
 
-  // Pick a random passage
-  const [passage] = await db.select().from(passages).orderBy(sql`RANDOM()`).limit(1);
+  // L1 personalized weighted pick — honors deprecated #10/#11.
+  // Excludes passages already pushed to this user (mirrors /api/push/send).
+  // Test pushes are not recorded into pushHistory (per ticket PLANET-1026 acceptance).
+  const history = await db
+    .select({ passageId: pushHistory.passageId })
+    .from(pushHistory)
+    .where(eq(pushHistory.userId, session.userId));
+  const excludeIds = history.map((h) => h.passageId);
+
+  const passage = await getWeightedPassage(session.userId, excludeIds);
   if (!passage) {
     return NextResponse.json({ error: 'No passages available' }, { status: 500 });
   }
