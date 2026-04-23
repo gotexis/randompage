@@ -100,6 +100,7 @@ pushRouter.post('/push/send', async (req: Request, res: Response) => {
 
     let sent = 0;
     let failed = 0;
+    let removed = 0;
     const personalized: { userId: string; passageId: string }[] = [];
 
     for (const [userId, userSubs] of subsByUser.entries()) {
@@ -145,8 +146,19 @@ pushRouter.post('/push/send', async (req: Request, res: Response) => {
               }),
             );
             userSent++;
-          } catch {
+          } catch (err: unknown) {
             failed++;
+            // Auto-cleanup expired subscriptions: 404 Not Found or 410 Gone (PLANET-1166)
+            const statusCode = (err as { statusCode?: number })?.statusCode;
+            if (statusCode === 404 || statusCode === 410) {
+              try {
+                await prisma.pushSubscription.delete({ where: { id: sub.id } });
+                removed++;
+                console.log(`[push/send] removed expired subscription ${sub.id} (HTTP ${statusCode})`);
+              } catch {
+                // ignore delete failures
+              }
+            }
           }
         }
 
@@ -167,7 +179,7 @@ pushRouter.post('/push/send', async (req: Request, res: Response) => {
       }
     }
 
-    res.json({ ok: true, sent, failed, personalized });
+    res.json({ ok: true, sent, failed, removed, personalized });
   } catch (e: unknown) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
   }
@@ -188,6 +200,7 @@ pushRouter.post('/cron/daily-push', async (req: Request, res: Response) => {
     });
 
     let sent = 0;
+    let removed = 0;
     for (const sub of subscriptions) {
       try {
         // Get weighted random passage for user
@@ -196,10 +209,25 @@ pushRouter.post('/cron/daily-push', async (req: Request, res: Response) => {
         const [passage] = await prisma.passage.findMany({ skip, take: 1 });
         if (!passage) continue;
 
-        await webpush.sendNotification(
-          { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
-          JSON.stringify({ title: 'RandomPage', body: passage.text.slice(0, 100) + '...', passageId: passage.id }),
-        );
+        try {
+          await webpush.sendNotification(
+            { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+            JSON.stringify({ title: 'RandomPage', body: passage.text.slice(0, 100) + '...', passageId: passage.id }),
+          );
+        } catch (err: unknown) {
+          // Auto-cleanup expired subscriptions: 404 Not Found or 410 Gone (PLANET-1166)
+          const statusCode = (err as { statusCode?: number })?.statusCode;
+          if (statusCode === 404 || statusCode === 410) {
+            try {
+              await prisma.pushSubscription.delete({ where: { id: sub.id } });
+              removed++;
+              console.log(`[cron/daily-push] removed expired subscription ${sub.id} (HTTP ${statusCode})`);
+            } catch {
+              // ignore delete failures
+            }
+          }
+          continue;
+        }
 
         await prisma.pushHistory.create({
           data: {
@@ -214,7 +242,7 @@ pushRouter.post('/cron/daily-push', async (req: Request, res: Response) => {
         // skip failed subscription
       }
     }
-    res.json({ ok: true, sent });
+    res.json({ ok: true, sent, removed });
   } catch (e: unknown) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
   }
