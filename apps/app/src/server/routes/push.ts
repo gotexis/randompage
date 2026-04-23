@@ -148,15 +148,21 @@ pushRouter.post('/push/send', async (req: Request, res: Response) => {
             userSent++;
           } catch (err: unknown) {
             failed++;
-            // Auto-cleanup expired subscriptions: 404 Not Found or 410 Gone (PLANET-1166)
-            const statusCode = (err as { statusCode?: number })?.statusCode;
-            if (statusCode === 404 || statusCode === 410) {
+            // Diagnostic logging for PLANET-1166 (3rd attempt) — capture full err shape
+            const e = err as { statusCode?: number; body?: string; message?: string; name?: string };
+            const statusCode = e?.statusCode;
+            console.log(`[push/send] webpush failed sub=${sub.id} endpoint=${sub.endpoint.slice(0, 60)}... statusCode=${statusCode} name=${e?.name} message=${e?.message} body=${(e?.body || '').slice(0, 200)}`);
+            // Auto-cleanup expired subscriptions: any 4xx is unrecoverable per Web Push RFC 8030.
+            // 5xx and missing/network errors are treated as transient and the sub is preserved.
+            // Broadened from 404/410-only because real-world stale subs may return other 4xx codes
+            // (e.g. 403 Forbidden for invalid VAPID auth against a now-rotated endpoint).
+            if (typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500) {
               try {
                 await prisma.pushSubscription.delete({ where: { id: sub.id } });
                 removed++;
                 console.log(`[push/send] removed expired subscription ${sub.id} (HTTP ${statusCode})`);
-              } catch {
-                // ignore delete failures
+              } catch (delErr) {
+                console.log(`[push/send] failed to delete sub ${sub.id}: ${delErr}`);
               }
             }
           }
@@ -215,15 +221,18 @@ pushRouter.post('/cron/daily-push', async (req: Request, res: Response) => {
             JSON.stringify({ title: 'RandomPage', body: passage.text.slice(0, 100) + '...', passageId: passage.id }),
           );
         } catch (err: unknown) {
-          // Auto-cleanup expired subscriptions: 404 Not Found or 410 Gone (PLANET-1166)
-          const statusCode = (err as { statusCode?: number })?.statusCode;
-          if (statusCode === 404 || statusCode === 410) {
+          // Diagnostic logging for PLANET-1166 (3rd attempt) — capture full err shape
+          const e = err as { statusCode?: number; body?: string; message?: string; name?: string };
+          const statusCode = e?.statusCode;
+          console.log(`[cron/daily-push] webpush failed sub=${sub.id} endpoint=${sub.endpoint.slice(0, 60)}... statusCode=${statusCode} name=${e?.name} message=${e?.message} body=${(e?.body || '').slice(0, 200)}`);
+          // Auto-cleanup expired subscriptions: any 4xx is unrecoverable per Web Push RFC 8030.
+          if (typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500) {
             try {
               await prisma.pushSubscription.delete({ where: { id: sub.id } });
               removed++;
               console.log(`[cron/daily-push] removed expired subscription ${sub.id} (HTTP ${statusCode})`);
-            } catch {
-              // ignore delete failures
+            } catch (delErr) {
+              console.log(`[cron/daily-push] failed to delete sub ${sub.id}: ${delErr}`);
             }
           }
           continue;
