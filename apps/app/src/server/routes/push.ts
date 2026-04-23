@@ -68,6 +68,111 @@ pushRouter.get('/push/history', async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/push/send
+// Auth: x-push-secret header == PUSH_SECRET (matches PLANET-951 contract)
+// Behavior: per-user personalized weighted sampling, excludes recently pushed passages,
+// records pushHistory, returns { sent, failed, personalized: [{userId, passageId}] }.
+pushRouter.post('/push/send', async (req: Request, res: Response) => {
+  try {
+    const secret = process.env.PUSH_SECRET;
+    const provided = req.header('x-push-secret');
+    if (!secret || provided !== secret) {
+      res.status(403).json({ error: 'Forbidden' });
+      return;
+    }
+    const prisma = getPrisma();
+    const subscriptions = await prisma.pushSubscription.findMany();
+
+    // Pre-load all passages once (small dataset, ~609 rows)
+    const passages = await prisma.passage.findMany();
+    if (passages.length === 0) {
+      res.json({ ok: true, sent: 0, failed: 0, personalized: [] });
+      return;
+    }
+
+    // Group subs by user so each user gets one personalized passage per send
+    const subsByUser = new Map<string, typeof subscriptions>();
+    for (const s of subscriptions) {
+      const arr = subsByUser.get(s.userId) ?? [];
+      arr.push(s);
+      subsByUser.set(s.userId, arr);
+    }
+
+    let sent = 0;
+    let failed = 0;
+    const personalized: { userId: string; passageId: string }[] = [];
+
+    for (const [userId, userSubs] of subsByUser.entries()) {
+      try {
+        // Build excludeIds from recent pushHistory (last 30 days)
+        const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+        const recent = await prisma.pushHistory.findMany({
+          where: { userId, sentAt: { gte: since } },
+          select: { passageId: true },
+        });
+        const excludeIds = new Set(recent.map(r => r.passageId));
+
+        // Personalized weighted sampling using user_preferences
+        const prefs = await prisma.userPreference.findMany({ where: { userId } });
+        const prefMap = Object.fromEntries(prefs.map(p => [p.tag, p.weight]));
+
+        const candidates = passages.filter(p => !excludeIds.has(p.id));
+        const pool = candidates.length > 0 ? candidates : passages; // fallback if all excluded
+
+        const weights = pool.map(p => {
+          const tags = p.tags.split(',').map(t => t.trim()).filter(Boolean);
+          const w = tags.reduce((sum, tag) => sum + (prefMap[tag] || 1), 0);
+          return { passage: p, weight: w > 0 ? w : 1 };
+        });
+        const totalWeight = weights.reduce((s, w) => s + w.weight, 0);
+        let rand = Math.random() * totalWeight;
+        let chosen = weights[0].passage;
+        for (const w of weights) {
+          rand -= w.weight;
+          if (rand <= 0) { chosen = w.passage; break; }
+        }
+
+        // Send to all of this user's subscriptions
+        let userSent = 0;
+        for (const sub of userSubs) {
+          try {
+            await webpush.sendNotification(
+              { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+              JSON.stringify({
+                title: 'RandomPage',
+                body: chosen.text.slice(0, 100) + (chosen.text.length > 100 ? '...' : ''),
+                passageId: chosen.id,
+              }),
+            );
+            userSent++;
+          } catch {
+            failed++;
+          }
+        }
+
+        if (userSent > 0) {
+          await prisma.pushHistory.create({
+            data: {
+              id: nanoid(),
+              userId,
+              passageId: chosen.id,
+              sentAt: new Date(),
+            },
+          });
+          sent += userSent;
+          personalized.push({ userId, passageId: chosen.id });
+        }
+      } catch {
+        failed++;
+      }
+    }
+
+    res.json({ ok: true, sent, failed, personalized });
+  } catch (e: unknown) {
+    res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
+  }
+});
+
 // POST /api/cron/daily-push
 pushRouter.post('/cron/daily-push', async (req: Request, res: Response) => {
   try {
