@@ -80,8 +80,13 @@ pushRouter.post('/push/send', async (req: Request, res: Response) => {
       res.status(403).json({ error: 'Forbidden' });
       return;
     }
+    // PLANET-1166 (5th attempt): kill switch to break stale-sub loop.
+    // ?force_clean_failed=1 → delete ANY subscription whose webpush.send fails for ANY reason.
+    // Use once to flush genuinely stale subs that don't return a clean 4xx, then drop the param.
+    const forceClean = req.query.force_clean_failed === '1' || req.query.force_clean_failed === 'true';
     const prisma = getPrisma();
     const subscriptions = await prisma.pushSubscription.findMany();
+    const failures: { subId: string; endpoint: string; statusCode: number | null; name: string | null; message: string | null; code: string | null; deleted: boolean }[] = [];
 
     // Pre-load all passages once (small dataset, ~609 rows)
     const passages = await prisma.passage.findMany();
@@ -148,23 +153,32 @@ pushRouter.post('/push/send', async (req: Request, res: Response) => {
             userSent++;
           } catch (err: unknown) {
             failed++;
-            // Diagnostic logging for PLANET-1166 (3rd attempt) — capture full err shape
-            const e = err as { statusCode?: number; body?: string; message?: string; name?: string };
-            const statusCode = e?.statusCode;
-            console.log(`[push/send] webpush failed sub=${sub.id} endpoint=${sub.endpoint.slice(0, 60)}... statusCode=${statusCode} name=${e?.name} message=${e?.message} body=${(e?.body || '').slice(0, 200)}`);
-            // Auto-cleanup expired subscriptions: any 4xx is unrecoverable per Web Push RFC 8030.
-            // 5xx and missing/network errors are treated as transient and the sub is preserved.
-            // Broadened from 404/410-only because real-world stale subs may return other 4xx codes
-            // (e.g. 403 Forbidden for invalid VAPID auth against a now-rotated endpoint).
-            if (typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500) {
+            const e = err as { statusCode?: number; body?: string; message?: string; name?: string; code?: string };
+            const statusCode = typeof e?.statusCode === 'number' ? e.statusCode : null;
+            const errCode = typeof e?.code === 'string' ? e.code : null;
+            // PLANET-1166 (5th attempt): also treat network-level errors (no statusCode but has err.code
+            // like ENOTFOUND/ECONNRESET/EAI_AGAIN) as unrecoverable — the push endpoint host is gone.
+            const isNetworkDead = statusCode === null && errCode !== null;
+            const is4xx = typeof statusCode === 'number' && statusCode >= 400 && statusCode < 500;
+            const shouldDelete = forceClean || is4xx || isNetworkDead;
+            let deleted = false;
+            if (shouldDelete) {
               try {
                 await prisma.pushSubscription.delete({ where: { id: sub.id } });
                 removed++;
-                console.log(`[push/send] removed expired subscription ${sub.id} (HTTP ${statusCode})`);
-              } catch (delErr) {
-                console.log(`[push/send] failed to delete sub ${sub.id}: ${delErr}`);
-              }
+                deleted = true;
+              } catch { /* swallow — sub may already be gone */ }
             }
+            failures.push({
+              subId: sub.id,
+              endpoint: sub.endpoint.slice(0, 80),
+              statusCode,
+              name: e?.name ?? null,
+              message: e?.message ?? null,
+              code: errCode,
+              deleted,
+            });
+            console.log(`[push/send] webpush failed sub=${sub.id} statusCode=${statusCode} code=${errCode} name=${e?.name} deleted=${deleted}`);
           }
         }
 
@@ -185,7 +199,7 @@ pushRouter.post('/push/send', async (req: Request, res: Response) => {
       }
     }
 
-    res.json({ ok: true, sent, failed, removed, personalized });
+    res.json({ ok: true, sent, failed, removed, personalized, failures });
   } catch (e: unknown) {
     res.status(500).json({ error: e instanceof Error ? e.message : String(e) });
   }
